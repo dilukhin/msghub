@@ -1,18 +1,18 @@
-# Architecture
+# Архитектура
 
-## Purpose
+## Назначение
 
-MsgHub connects chats from different messaging platforms into a single logical conversation without making the relay core depend on any one platform API.
+MsgHub объединяет чаты разных мессенджеров в единый логический разговор и не привязывает relay core к API конкретной платформы.
 
-The initial implementation targets Telegram and WhatsApp, while the architecture must allow VK, MAX, and additional adapters to be added without redesigning routing or persistence.
+Первая реализация ориентирована на Telegram и WhatsApp. Архитектура должна позволять добавлять VK, MAX и другие платформы без переделки маршрутизации и долговременного состояния.
 
-## Core concepts
+## Базовые сущности
 
 ### LogicalRoom
 
-A platform-independent conversation managed by MsgHub. A room contains one or more platform endpoints.
+Платформонезависимый логический разговор, управляемый MsgHub. В одном `LogicalRoom` находится один или несколько endpoint-ов.
 
-Example:
+Пример:
 
 ```text
 logical room: family
@@ -23,18 +23,28 @@ logical room: family
 
 ### Endpoint
 
-A concrete chat/group/channel on one platform. An endpoint belongs to exactly one LogicalRoom in the initial design.
+Конкретный чат, группа или канал одной платформы. В исходной модели endpoint принадлежит ровно одному `LogicalRoom`.
 
 ### CanonicalEvent
 
-A normalized event produced by an adapter and consumed by the relay core. Platform-native payloads must not leak into routing logic.
+Нормализованное событие, которое создаёт адаптер и потребляет relay core. Нативные payload-ы Telegram/WhatsApp/VK/MAX не должны проникать в маршрутизацию.
 
-Initial event kinds:
+Первый обязательный тип:
 
-- `message.created`
-- reserved for later: `message.edited`, `message.deleted`, reactions and other platform events.
+```text
+message.created
+```
 
-A message event contains at least:
+На будущее резервируются:
+
+```text
+message.edited
+message.deleted
+reaction.added
+reaction.removed
+```
+
+Минимальный состав message event:
 
 ```text
 event_id
@@ -51,13 +61,13 @@ message.attachments[]
 metadata
 ```
 
-`metadata` may retain adapter-specific diagnostic data, but routing correctness must not depend on undocumented platform fields.
+`metadata` может содержать ограниченные adapter-specific диагностические сведения. Корректность маршрутизации не должна зависеть от недокументированных платформенных полей.
 
 ### Delivery
 
-A durable attempt to materialize one CanonicalEvent on one destination endpoint.
+Долговечная задача материализовать один `CanonicalEvent` на одном целевом endpoint.
 
-Initial states:
+Начальная машина состояний:
 
 ```text
 pending -> sending -> delivered
@@ -66,24 +76,31 @@ pending -> sending -> delivered
                    -> failed
 ```
 
-`uncertain` is distinct from `failed`: it means the transport connection ended without enough evidence to know whether the remote platform accepted the message. Blind retry from this state can create duplicates and therefore requires adapter-specific reconciliation or an explicit policy.
+`uncertain` принципиально отличается от `failed`: транспорт оборвался, а доказательств того, приняла ли удалённая платформа сообщение, недостаточно. Слепой retry может создать дубликат, поэтому требуется reconciliation либо явно принятая политика.
 
 ### MessageLink
 
-Maps one canonical message to its platform-native copies. It is required for reply reconstruction, deduplication, edits/deletes later, and loop prevention.
+Связывает каноническое сообщение с его платформенными копиями.
 
 ```text
-canonical_message X
+canonical message X
   telegram -> message 931
   whatsapp -> message ABC
   max      -> message 71291
 ```
 
+`MessageLink` нужен для:
+
+- reply mapping;
+- дедупликации;
+- защиты от циклов;
+- будущих edit/delete операций.
+
 ### MediaObject
 
-A temporary local representation of an attachment used to bridge platforms. MsgHub is not intended to become a permanent media archive.
+Временное локальное представление вложения, необходимое для передачи между платформами. MsgHub не является постоянным архивом мультимедиа.
 
-## Component model
+## Компонентная схема
 
 ```text
 +---------------------------+
@@ -126,11 +143,11 @@ A temporary local representation of an attachment used to bridge platforms. MsgH
 +---------------------------+
 ```
 
-## Adapter boundary
+## Граница адаптера
 
-The relay core works against a small adapter contract rather than platform SDK objects.
+Relay core работает с небольшим общим контрактом, а не с объектами SDK конкретного мессенджера.
 
-Conceptually:
+Концептуально:
 
 ```text
 start()
@@ -143,57 +160,70 @@ capabilities() -> CapabilitySet
 health() -> AdapterHealth
 ```
 
-The exact programming-language interface is intentionally deferred until the implementation language is chosen.
+Точный программный интерфейс определяется после выбора языка реализации в Issue #2.
 
-## Ingress flow
-
-```text
-1. Adapter receives a platform event.
-2. Adapter normalizes it to CanonicalEvent.
-3. Core resolves the source Endpoint and LogicalRoom.
-4. Core checks source identity/deduplication constraints.
-5. Event is persisted transactionally.
-6. One Delivery is created for every eligible destination endpoint.
-7. Transaction commits.
-8. Delivery workers process pending work.
-```
-
-No external send should be required for the ingress transaction to commit.
-
-## Delivery flow
+## Входящий поток
 
 ```text
-1. Claim a pending/retry Delivery.
-2. Resolve reply target through MessageLink if present.
-3. Render sender attribution for the destination platform.
-4. Materialize required media.
-5. Send through destination adapter.
-6. Persist remote message ID and mark delivered.
-7. Release media when all dependent deliveries are terminal and retention policy permits cleanup.
+1. Адаптер получает платформенное событие.
+2. Адаптер нормализует его в CanonicalEvent.
+3. Core определяет source Endpoint и LogicalRoom.
+4. Core проверяет идентичность source и deduplication constraints.
+5. Event долговечно записывается.
+6. Для каждого допустимого target Endpoint создаётся Delivery.
+7. Транзакция фиксируется.
+8. Delivery workers начинают обработку pending work.
 ```
 
-## Loop prevention and deduplication
+Для фиксации ingress не требуется успешная внешняя отправка.
 
-Loop prevention is a correctness requirement, not a presentation trick.
+Событие считается принятым MsgHub только после commit его канонического состояния и связанных delivery records.
 
-The system must not depend on hidden text markers or comparing rendered message text.
+## Исходящая доставка
 
-Two persistent mechanisms are required:
+```text
+1. Worker атомарно забирает pending/retry Delivery.
+2. При наличии reply разрешается MessageLink родителя.
+3. Формируется представление автора для целевой платформы.
+4. При необходимости материализуется media.
+5. Адаптер выполняет send.
+6. Сохраняется remote message ID и итоговый state.
+7. Media освобождается только когда все зависимые Delivery безопасны для удаления.
+```
 
-1. uniqueness of `(platform, endpoint_id, source_message_id)` for ingested native messages;
-2. MessageLink/Delivery records for messages created by MsgHub on destination platforms.
+## Защита от циклов и дедупликация
 
-Adapters may additionally suppress events identified by a native `from_self`/equivalent flag, but that is only an optimization.
+Защита от relay loop является требованием корректности.
+
+Нельзя полагаться на:
+
+- скрытые текстовые маркеры;
+- сравнение текста сообщений;
+- только `from_self` или аналогичный флаг платформы.
+
+Нужны как минимум два постоянных механизма:
+
+1. уникальность `(platform, endpoint_id, source_message_id)` для принятых нативных сообщений;
+2. `MessageLink`/`Delivery` records для сообщений, созданных MsgHub на целевых платформах.
+
+Нативный `from_self` допускается как дополнительная ранняя оптимизация.
 
 ## Replies
 
-When a platform reports a reply to one of its local messages, the adapter exposes the local replied-to message ID. The core resolves that ID through MessageLink to the canonical parent and then selects the corresponding destination-native parent ID, if one exists.
+Если платформа сообщает reply на локальное сообщение, адаптер передаёт ID локального родителя. Core:
 
-If a destination cannot preserve a native reply, the adapter may fall back to quoted/context text according to policy.
+```text
+local replied-to ID
+  -> MessageLink
+  -> canonical parent
+  -> destination-native parent ID
+```
 
-## Capability negotiation
+Если native reply на целевой платформе невозможен, используется детерминированный fallback: цитата/контекст по правилам capability policy.
 
-Platforms do not expose identical semantics. Each adapter declares supported capabilities, for example:
+## Возможности платформ
+
+Каждый адаптер объявляет `CapabilitySet`, например:
 
 ```text
 send_text
@@ -210,70 +240,84 @@ poll
 location
 ```
 
-The core applies per-room policy when a capability is missing: degrade, skip, or fail the delivery. MVP policy must be explicit rather than accidental.
+При отсутствии capability core применяет явную per-room policy: degrade, skip или fail. Неявное поведение недопустимо.
 
-## Persistence
+## Долговременное состояние
 
-SQLite in WAL mode is the initial persistence engine.
+Для v0.1 используется SQLite в WAL mode.
 
-Expected logical tables:
+Логические таблицы:
 
-- `logical_rooms`
-- `endpoints`
-- `events`
-- `deliveries`
-- `message_links`
-- `identities` (optional for MVP)
-- `adapter_state`
-- `media_objects`
+- `logical_rooms`;
+- `endpoints`;
+- `events`;
+- `deliveries`;
+- `message_links`;
+- `identities` — необязательно для первого MVP;
+- `adapter_state`;
+- `media_objects`.
 
-The delivery queue is stored in the same database so an accepted ingress event and its outbound work can be committed atomically.
+Очередь доставки хранится в той же БД, чтобы accepted ingress и outbound work фиксировались атомарно.
 
-PostgreSQL may replace SQLite later if scale requires it; routing and adapter contracts must not depend on SQLite-specific behavior.
+Переход на PostgreSQL возможен позже при доказанной необходимости. Core contracts не должны зависеть от SQLite-specific поведения сильнее, чем требуется текущей реализации.
 
-## Media storage
+## Мультимедиа
 
-Media is temporary delivery state, not the authoritative conversation archive.
+Мультимедиа — временное состояние доставки.
 
-Initial policy target:
+Исходный ориентир:
 
 ```text
-soft cache target: 5 GiB
+soft cache target: около 5 GiB
 hard cache ceiling: configurable
-successful delivery retention: about 24 h
-failed/retry retention: longer, e.g. up to 7 d
+successful delivery retention: около 24 h
+failed/retry retention: дольше, например до 7 d
 ```
 
-Exact defaults are implementation decisions and must remain configurable.
+Точные значения — настройки.
 
-Cleanup must never remove media still required by a `pending`, `sending`, `retry`, or `uncertain` delivery.
-
-Disk exhaustion must degrade media delivery without preventing the core from persisting and forwarding ordinary text messages where possible.
-
-## WhatsApp isolation
-
-The initial bridge for ordinary WhatsApp user groups may require a WhatsApp Web-compatible integration rather than an official business-group API.
-
-This dependency is treated as replaceable and higher-risk. It should run in a separate process/failure domain from the stable relay core.
+Cleanup не должен удалять объект, пока он нужен хотя бы одной доставке в состоянии:
 
 ```text
-relay-core <-> local IPC <-> whatsapp-adapter <-> WhatsApp transport
+pending
+sending
+retry
+uncertain
 ```
 
-A future official adapter should be able to implement the same logical contract without changes to routing or persistence.
+Заполнение media cache не должно лишать SQLite возможности фиксировать текстовые сообщения. При hard pressure допустимо отказаться от нового крупного media, продолжая text relay.
 
-## Deployment model
+## Изоляция WhatsApp
 
-Initial target: one small Ubuntu VPS.
+Для обычной пользовательской WhatsApp-группы v0.1 может потребоваться WhatsApp Web-совместимый transport вместо официального business-group API.
+
+Такой transport считается:
+
+- повышенно рискованным;
+- заменяемым;
+- потенциально чувствительным к изменениям WhatsApp;
+- отдельной зоной отказа.
+
+Предпочтительная граница:
+
+```text
+relay-core <-> versioned local IPC <-> whatsapp-adapter <-> WhatsApp transport
+```
+
+Будущий официальный адаптер должен уметь реализовать тот же логический контракт без переделки core routing/persistence.
+
+## Модель развёртывания
+
+Первый target — одна небольшая Ubuntu VPS.
 
 ```text
 systemd
-  relay-core.service
-  relay-whatsapp.service
+  msghub-core.service
+  msghub-whatsapp.service
 
 /etc/msghub/
   configuration
-  secrets (permissions restricted)
+  secrets
 
 /var/lib/msghub/
   database
@@ -281,36 +325,47 @@ systemd
   media cache
 ```
 
-A reverse proxy is optional and only required when selected adapters use inbound HTTPS webhooks.
+Reverse proxy нужен только если выбранные адаптеры требуют входящих HTTPS webhooks.
 
-## Security boundaries
+Ориентир ресурсов:
 
-- credentials and session state are never committed to Git;
-- platform tokens and WhatsApp session material are treated as secrets;
-- adapters receive only the credentials they need;
-- diagnostics must redact tokens, cookies, QR/session material and private payloads by default;
-- media cache and database files should be readable only by the MsgHub service account;
-- all inbound webhook endpoints must authenticate platform requests where the platform supports it.
+```text
+1–2 vCPU
+1–2 GiB RAM
+около 20 GiB SSD
+```
 
-## Architectural invariants
+## Границы безопасности
 
-1. Platform-native objects do not become the core data model.
-2. Ingress is durably recorded before outbound delivery is considered complete.
-3. Delivery retry is persistent across process/VPS restarts.
-4. Loop prevention survives restarts.
-5. `uncertain` delivery is not silently treated as an ordinary retry.
-6. Media storage is bounded.
-7. One failing adapter must not corrupt or block unrelated room state.
-8. Adding a new platform must not require a new pairwise Telegram-to-X router.
+- секреты и session state не попадают в Git;
+- каждому адаптеру выдаются только необходимые credentials;
+- diagnostics по умолчанию не содержат tokens, cookies, QR/session material и private payload;
+- database/media/session files читаются только сервисным пользователем MsgHub;
+- inbound webhook аутентифицируется, если платформа предоставляет соответствующий механизм;
+- полное содержимое приватных сообщений не является штатной частью логов.
 
-## Open decisions before implementation
+## Архитектурные инварианты
 
-- implementation language and runtime;
-- concrete local IPC between core and isolated adapters;
-- exact CanonicalEvent schema and versioning rules;
-- SQLite locking/worker strategy;
-- retry/reconciliation policy per adapter;
-- initial Telegram receive mode (long polling vs webhook);
-- exact WhatsApp integration library after a dedicated feasibility spike;
-- configuration format and secret injection mechanism;
-- observability contract and operator commands.
+1. Platform-native objects не являются core data model.
+2. Ingress долговечен до признания события принятым.
+3. Retry state переживает restart.
+4. Loop prevention переживает restart.
+5. `uncertain` не приравнивается к обычному retry.
+6. Media storage ограничено.
+7. Отказ одного адаптера не должен повреждать состояние остальных endpoint-ов/room-ов.
+8. Новая платформа не требует нового попарного Telegram-to-X router.
+9. Приватные payload-ы не являются штатным диагностическим выводом.
+10. Архитектура v0.1 должна оставаться пригодной для дешёвой VPS.
+
+## Открытые решения до реализации
+
+- язык и runtime;
+- точная схема `CanonicalEvent v1` и versioning;
+- конкретный local IPC;
+- SQLite worker/locking strategy;
+- retry/reconciliation policy по адаптерам;
+- Telegram receive mode: long polling или webhook;
+- библиотека/transport WhatsApp после feasibility spike;
+- config format и secret injection;
+- observability/health contract;
+- конкретные команды тестов и CI jobs.

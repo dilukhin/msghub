@@ -1,32 +1,34 @@
 # MsgHub
 
-MsgHub is a self-hosted message relay for linking chats and groups across different messaging platforms into one logical conversation.
+MsgHub — самохостинговая система ретрансляции сообщений, которая объединяет чаты и группы разных мессенджеров в один логический разговор.
 
-A message received in one connected endpoint is normalized, persisted, routed, and delivered to the other endpoints while preserving sender attribution, replies, attachments, and message relationships where the destination platform allows it.
+Сообщение, полученное в одном подключённом endpoint, нормализуется, долговечно сохраняется, маршрутизируется и доставляется в остальные endpoint-ы с сохранением автора, reply-связей, вложений и других отношений между сообщениями настолько, насколько это позволяют целевые платформы.
 
-## Initial scope
+## Первая цель
 
-The first target is a bidirectional bridge:
+Первая полезная версия — двусторонний мост:
 
 ```text
 Telegram group <-> MsgHub <-> WhatsApp group
 ```
 
-Planned adapters include VK, MAX, and other messaging platforms.
+В дальнейшем планируются адаптеры VK, MAX и других платформ.
 
-## Design goals
+## Основные принципы
 
-- platform-independent relay core;
-- arbitrary number of platform endpoints in one logical room;
-- durable ingress and delivery queue;
-- loop prevention and deduplication;
-- reply/message mapping between platforms;
-- bounded temporary media storage instead of a permanent media archive;
-- adapter capability negotiation for platform differences;
-- recoverable operation on a small Ubuntu VPS;
-- replaceable WhatsApp integration isolated from the relay core.
+- платформонезависимое ядро;
+- произвольное число endpoint-ов внутри одного `LogicalRoom`;
+- долговечный ingress и очередь доставки;
+- защита от циклов и дедупликация, переживающие перезапуск;
+- постоянное соответствие message IDs между платформами;
+- восстановление native replies там, где это возможно;
+- явное состояние `uncertain` для отправок с неизвестным фактом удалённого принятия;
+- ограниченное временное хранение мультимедиа вместо постоянного архива;
+- capability-модель для различий между платформами;
+- эксплуатация на небольшой Ubuntu VPS;
+- изолированный и заменяемый WhatsApp-адаптер.
 
-## Proposed architecture
+## Архитектура
 
 ```text
 Platform APIs / clients
@@ -38,7 +40,7 @@ Platform APIs / clients
           |
           v
 +-------------------+
-|     Relay Core    |
+|    Relay Core     |
 | normalize         |
 | route             |
 | deduplicate       |
@@ -55,10 +57,37 @@ Platform APIs / clients
 +-------------------+
 ```
 
-The initial deployment model is a modular monolith for the stable core and official API adapters, with the WhatsApp Web compatibility adapter isolated as a separate process/failure domain.
+Для v0.1 предполагается модульный монолит для стабильного ядра и официальных API-адаптеров. WhatsApp Web-совместимый transport, если он будет выбран после feasibility spike, работает отдельным процессом и отдельной зоной отказа.
 
-## Status
+## Документация
 
-Design / pre-alpha. No production implementation exists yet.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — архитектура и инварианты;
+- [`docs/MVP_V0.1.md`](docs/MVP_V0.1.md) — scope и критерии готовности v0.1;
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — порядок работ;
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — правила разработки;
+- [`AGENTS.md`](AGENTS.md) — правила для ChatGPT и других агентов.
 
-The initial architecture and MVP contract are documented under [`docs/`](docs/).
+## Язык проекта
+
+Русский — основной язык человекочитаемой части MsgHub: документации, логов, диагностики, CLI, комментариев, Issues, PR и commit messages. Кодовые идентификаторы и внешние протокольные поля могут оставаться английскими, если это требуется совместимостью или точностью.
+
+## Хранение данных
+
+Текст и служебные метаданные могут храниться длительно в SQLite. Мультимедиа рассматривается как временное состояние доставки и хранится в ограниченном кэше.
+
+Исходный эксплуатационный ориентир для v0.1:
+
+```text
+1–2 vCPU
+1–2 GiB RAM
+около 20 GiB SSD
+media cache: примерно 5 GiB soft budget
+```
+
+Точные лимиты являются настройками, а не частью протокола.
+
+## Статус
+
+Стадия проектирования / pre-alpha. Production implementation пока отсутствует.
+
+Актуальная последовательность работ ведётся через GitHub Issues. Начальные параллельные задачи: формализация core contract, проверка WhatsApp transport и проверка Telegram adapter contract.
