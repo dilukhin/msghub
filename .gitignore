@@ -1,0 +1,37 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Runtime state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+media/
+state/
+data/
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Build / coverage outputs
+build/
+dist/
+coverage/
