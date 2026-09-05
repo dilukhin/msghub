@@ -65,6 +65,7 @@ Platform APIs / clients
 - [`docs/MVP_V0.1.md`](docs/MVP_V0.1.md) — scope и критерии готовности v0.1;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — порядок работ;
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — правила разработки;
+- [`docs/CHATGPT_PROJECT_SOURCE.md`](docs/CHATGPT_PROJECT_SOURCE.md) — расширенный контекст для Sources проекта ChatGPT Web;
 - [`AGENTS.md`](AGENTS.md) — правила для ChatGPT и других агентов.
 
 ## Язык проекта
