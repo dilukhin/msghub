@@ -1,100 +1,122 @@
-# Roadmap
+# Дорожная карта
 
-This roadmap is intentionally ordered around risk reduction. The first unknown is not routing logic; it is the practical behavior and operational stability of the WhatsApp endpoint intended for an ordinary user group.
+Дорожная карта выстроена вокруг снижения рисков. Главная ранняя неопределённость — не маршрутизация, а практическое поведение и эксплуатационная стабильность WhatsApp endpoint для обычной пользовательской группы.
 
-## Phase 0 — freeze the design contract
+## Фаза 0 — зафиксировать core contract
 
-Goal: remove architectural ambiguity before implementation.
+Цель: убрать архитектурную неоднозначность до реализации.
 
-Deliverables:
+Результаты:
 
-- CanonicalEvent v1 schema;
+- `CanonicalEvent v1` schema;
 - endpoint / logical-room model;
 - delivery state machine;
-- message-link and reply-resolution rules;
-- capability model and degradation policy;
+- MessageLink и reply-resolution rules;
+- capability model и degradation policy;
 - media lifecycle/quota contract;
-- configuration/secrets model;
+- config/secrets model;
 - observability/health contract;
-- implementation language/runtime decision.
+- решение по языку/runtime;
+- требования к IPC для изолированных adapters.
 
-Exit gate: core behavior can be tested without any real messaging platform.
+Gate: core behavior можно полноценно тестировать без реальных мессенджеров.
 
-## Phase 1 — adapter feasibility spikes
+GitHub: Issue #2.
+
+## Фаза 1 — feasibility spikes адаптеров
 
 ### WhatsApp spike
 
-Validate the intended ordinary-group transport before coupling production code to a specific library.
+Проверить транспорт для обычной WhatsApp-группы до того, как production-код начнёт зависеть от конкретной библиотеки.
 
-Questions:
+Нужно получить фактические ответы:
 
-- login/pairing flow and unattended restart behavior;
-- group message receive/send semantics;
-- stable native message identifiers;
-- `from self`/echo behavior;
-- replies and quoted message identifiers;
-- media download/upload behavior;
-- reconnect behavior around ambiguous sends;
-- session persistence and backup implications;
-- CPU/RAM/disk footprint on target VPS;
-- upgrade/protocol-breakage risk.
+- pairing/login flow;
+- unattended restart;
+- session persistence и backup/recovery;
+- group receive/send semantics;
+- стабильные group/message/user IDs;
+- self-echo/from-self behavior;
+- replies/quoted IDs;
+- media download/upload;
+- duplicate events;
+- reconnect behavior;
+- ambiguous send при потере соединения;
+- retryable/terminal errors;
+- CPU/RAM/disk/network footprint;
+- риск protocol/library breakage и процедура recovery.
 
-The spike may be disposable code. Its output is a documented transport contract and go/no-go decision.
+Spike-код может быть одноразовым. Итог — документированный transport contract и решение go/no-go.
+
+GitHub: Issue #3.
 
 ### Telegram spike
 
-Confirm Bot API group behavior needed by MsgHub:
+Подтвердить нужное MsgHub поведение Telegram Bot API:
 
-- receive mode;
-- stable message/chat identifiers;
-- replies;
-- files;
+- bot permissions/privacy;
+- long polling vs webhook;
+- стабильные IDs;
 - sender attribution;
-- duplicate/update behavior;
-- rate/error handling.
+- replies;
+- files/media;
+- duplicate/update delivery;
+- rate/error handling;
+- self-authored bot message behavior;
+- restart semantics;
+- adapter capabilities/limits.
 
-Exit gate: both adapters have evidence-backed contracts sufficient for MVP implementation.
+GitHub: Issue #4.
 
-## Phase 2 — platform-independent core
+Gate фазы: оба транспорта имеют evidence-backed contract, достаточный для реализации MVP.
 
-Implement and test without real messaging services:
+## Фаза 2 — платформонезависимое ядро
 
-- configuration model;
-- LogicalRoom/Endpoint registry;
-- CanonicalEvent;
-- SQLite schema and migrations;
+Реализовать и протестировать без реальных messaging services:
+
+- config model;
+- `LogicalRoom`/`Endpoint` registry;
+- `CanonicalEvent v1`;
+- SQLite schema/migrations;
 - transactional ingress;
 - durable Delivery queue;
 - delivery state machine;
-- deduplication and loop-prevention records;
-- MessageLink mapping;
+- retry scheduling;
+- deduplication/loop-prevention records;
+- MessageLink;
 - reply resolution;
 - adapter capability interface;
-- media-object lifecycle and quota accounting;
+- MediaObject lifecycle/quota accounting;
 - health/diagnostic snapshot.
 
-Exit gate: deterministic unit/integration tests using fake adapters pass restart, duplicate, retry and uncertain-delivery scenarios.
+Gate: deterministic tests на fake adapters проходят restart, duplicate, retry, terminal failure и uncertain cases.
 
-## Phase 3 — Telegram adapter
+GitHub: Issue #5.
 
-Implement Telegram against the frozen adapter contract.
+## Фаза 3 — Telegram adapter
 
-Exit gate: real Telegram group can ingest and receive test messages while core tests remain platform-independent.
+Реализовать production Telegram adapter против зафиксированного core contract.
 
-## Phase 4 — isolated WhatsApp adapter
+Gate: реальная Telegram-группа умеет отдавать события в core и принимать сообщения из core, при этом core tests не зависят от Telegram.
 
-Implement the selected WhatsApp transport as a separate process/failure domain with a versioned local IPC contract.
+GitHub: Issue #6.
 
-Exit gate: adapter restart/reconnect does not require relay-core restart or database repair.
+## Фаза 4 — изолированный WhatsApp adapter
 
-## Phase 5 — end-to-end text bridge
+Реализовать выбранный transport отдельным процессом/зоной отказа с versioned local IPC.
 
-Connect one Telegram group and one WhatsApp group.
+Gate: restart/reconnect адаптера не требует restart relay core и не повреждает database state.
 
-Required gates:
+GitHub: Issue #7.
+
+## Фаза 5 — сквозной текстовый мост
+
+Соединить одну Telegram-группу и одну WhatsApp-группу.
+
+Обязательные gates:
 
 - bidirectional text;
-- attribution;
+- sender attribution;
 - loop prevention;
 - deduplication;
 - restart recovery;
@@ -102,22 +124,26 @@ Required gates:
 - diagnostics;
 - controlled handling of uncertain sends.
 
-This is the first useful release candidate.
+Это первый полезный release candidate.
 
-## Phase 6 — bounded media relay
+GitHub: Issue #8.
 
-Add images, documents and voice/audio under a strict media-cache lifecycle and disk budget.
+## Фаза 6 — ограниченное мультимедиа
 
-Required gates:
+Добавить изображения, документы и voice/audio в рамках строгого media-cache lifecycle.
 
-- per-file limits;
+Обязательные gates:
+
+- per-file limit;
 - total-cache quota;
 - safe cleanup;
 - restart recovery;
-- no deletion of media required by live deliveries;
-- text path survives media-pressure conditions.
+- media, нужное live delivery, не удаляется;
+- text path продолжает работать при media pressure.
 
-## Phase 7 — operations and v0.1 release
+GitHub: Issue #9.
+
+## Фаза 7 — эксплуатация и v0.1
 
 - systemd units;
 - Ubuntu installation guide;
@@ -130,23 +156,26 @@ Required gates:
 - real-group acceptance test;
 - release/versioning policy.
 
-## Later
+GitHub: Issue #10.
 
-After v0.1 is stable:
+## После v0.1
+
+После стабилизации первой версии:
 
 - MAX adapter;
 - VK adapter;
-- message edits/deletes;
+- edits/deletes;
 - reactions;
-- richer media/sticker policies;
+- richer media/sticker policy;
 - cross-platform identity mapping;
-- multiple logical rooms / administration tooling;
-- optional PostgreSQL or external object storage if actual scale requires them.
+- несколько LogicalRoom и administration tooling;
+- optional PostgreSQL/object storage, только если фактический scale этого потребует.
 
-## Principles for issue planning
+## Правила планирования
 
-- Keep architecture work separate from transport experiments.
-- Do not implement pairwise `Telegram -> WhatsApp` routing; all routes pass through the canonical core.
-- Do not add infrastructure merely because it is conventional. SQLite/local bounded media are preferred until measurements prove otherwise.
-- Treat non-official or reverse-engineered transports as replaceable dependencies and explicit operational risk.
-- Every reliability feature must be testable under restart/failure, not only on the happy path.
+- Архитектурные решения отделять от transport experiments.
+- Не писать pairwise `Telegram -> WhatsApp` routing: все маршруты проходят через canonical core.
+- Не добавлять инфраструктуру только потому, что она «обычно используется»; SQLite и bounded local media предпочтительны до появления измерений против них.
+- Неофициальные/reverse-engineered transports считать заменяемыми dependencies с отдельным operational risk.
+- Reliability feature считается реализованной только если проверена на failure/restart, а не только на happy path.
+- Каждую задачу удерживать в scope соответствующего Issue; новые крупные требования оформлять отдельно.

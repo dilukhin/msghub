@@ -1,79 +1,80 @@
 # MVP v0.1
 
-## Objective
+## Цель
 
-Prove that MsgHub can reliably bridge one ordinary Telegram group and one ordinary WhatsApp group on a small Ubuntu VPS without losing accepted messages across process restarts and without creating relay loops.
+Доказать, что MsgHub может надёжно объединить одну обычную Telegram-группу и одну обычную WhatsApp-группу на небольшой Ubuntu VPS без потери уже принятых сообщений при перезапусках и без возникновения relay loop.
 
-The architecture must already support more than two endpoints per logical room, but v0.1 validation uses exactly one Telegram endpoint and one WhatsApp endpoint.
+Архитектура при этом уже должна поддерживать более двух endpoint-ов внутри одного `LogicalRoom`, хотя v0.1 валидируется на паре Telegram + WhatsApp.
 
-## Required user-visible behavior
+## Обязательное поведение
 
-### Phase A — reliable text relay
+### Этап A — надёжный текстовый мост
 
-A text message posted by a human participant in either connected group appears in the other group with clear sender attribution.
+Сообщение человека в любой из двух групп появляется в другой группе с понятным указанием автора.
 
-Required:
+Обязательно:
 
 - Telegram -> WhatsApp text;
 - WhatsApp -> Telegram text;
-- sender display name attribution;
-- durable delivery across service restart;
-- persistent message ID mapping;
-- no self-amplifying relay loop;
-- bounded retry with visible terminal failure state;
-- basic health/status diagnostics.
+- sender attribution;
+- долговечная доставка через restart;
+- постоянное сопоставление message IDs;
+- отсутствие самораскручивающегося relay loop;
+- ограниченный retry с диагностируемым terminal failure;
+- базовый health/status.
 
-### Phase B — conversation structure
+### Этап B — структура разговора
 
-Required:
+Обязательно:
 
-- native replies are preserved when both sides provide enough identifiers;
-- fallback rendering is deterministic when a native reply cannot be preserved;
-- duplicated inbound events are idempotently ignored.
+- native replies сохраняются, когда обе платформы дают необходимые ID;
+- fallback для невозможного native reply детерминирован;
+- duplicate ingress обрабатывается идемпотентно;
+- echo сообщений, созданных самим MsgHub, не запускает повторную маршрутизацию.
 
-### Phase C — common media
+### Этап C — распространённое мультимедиа
 
-Required media classes:
+Обязательные классы:
 
-- images;
-- ordinary files/documents;
-- voice/audio where practical with the selected transports.
+- изображения;
+- обычные файлы/документы;
+- voice/audio, если выбранные transports позволяют практичное отображение.
 
-Required media behavior:
+Обязательное поведение media:
 
-- temporary local download only when needed for bridging;
+- локальное скачивание только когда оно нужно для доставки;
 - configurable per-file limit;
-- bounded total cache;
-- cleanup after all dependent deliveries become safe to remove;
-- text relay remains operational when media intake is rejected because of storage limits.
+- ограниченный общий cache;
+- cleanup после того, как все зависимые Delivery безопасны для удаления;
+- text relay продолжает работать, если media intake отклонён из-за нехватки выделенного бюджета.
 
-Video may be enabled if it falls out naturally from the selected adapters, but large-video optimization is not a v0.1 gate.
+Видео допустимо, если поддержка естественно получается из выбранных адаптеров, но оптимизация больших видео не является gate v0.1.
 
-## Out of scope for v0.1
+## Вне scope v0.1
 
-These are intentionally deferred unless required to make the basic bridge correct:
+Если иное не требуется для корректности базового моста, откладываются:
 
-- message edits;
-- message deletion propagation;
+- propagation edits;
+- propagation deletes;
 - reactions;
 - polls;
-- stickers as first-class cross-platform objects;
-- live locations;
-- history import before MsgHub was connected;
-- synchronization of group membership;
-- synchronization of administrator roles/permissions;
-- end-user identity merging across platforms;
-- graphical administration UI;
+- stickers как first-class cross-platform objects;
+- live location;
+- импорт истории до подключения MsgHub;
+- синхронизация состава групп;
+- синхронизация прав администраторов;
+- объединение пользовательских identity между платформами;
+- графический интерфейс администрирования;
 - multi-node/high-availability deployment;
-- permanent media archive;
-- Redis, RabbitMQ, Kafka, or another external queue;
-- PostgreSQL as an initial requirement.
+- постоянный media archive;
+- Redis/RabbitMQ/Kafka и внешняя очередь;
+- PostgreSQL как обязательное исходное хранилище.
 
-## Reliability contract
+## Контракт надёжности
 
-MsgHub does not claim mathematically exact once-only delivery across independent third-party messaging platforms.
+MsgHub не заявляет математический exactly-once между независимыми сторонними платформами.
 
-The v0.1 target is:
+Цель v0.1:
 
 ```text
 durable ingress
@@ -82,67 +83,68 @@ durable ingress
 + explicit uncertain state when remote acceptance is unknown
 ```
 
-An event is considered accepted by MsgHub only after its canonical representation and required delivery records are committed to durable storage.
+Событие считается принятым только после commit канонического представления и всех требуемых delivery records.
 
-## Failure expectations
+## Ожидаемые отказы
 
-The bridge must recover sensibly from:
+Мост должен корректно восстанавливаться после:
 
-- relay-core restart;
-- WhatsApp adapter restart;
-- temporary network loss;
-- Telegram API transient failure;
+- restart relay core;
+- restart WhatsApp adapter;
+- временной потери сети;
+- transient Telegram API failure;
 - WhatsApp reconnect/session churn;
-- duplicate inbound event delivery;
+- duplicate inbound event;
 - SQLite process interruption/crash recovery;
-- destination platform rate limiting;
-- full/near-full media cache.
+- destination rate limiting;
+- заполнения/почти заполнения media cache.
 
-A WhatsApp adapter failure must not corrupt the database or require rebuilding Telegram state.
+Отказ WhatsApp adapter не должен повреждать БД или требовать перестроения Telegram state.
 
-## Deployment target
+## Целевая VPS
 
-Initial production-like target:
+Ориентир production-like окружения:
 
 ```text
 Ubuntu VPS
-1-2 vCPU
-1-2 GiB RAM
-~20 GiB SSD preferred
+1–2 vCPU
+1–2 GiB RAM
+около 20 GiB SSD предпочтительно
 ```
 
-The implementation should avoid a headless Chromium requirement if a stable enough browserless WhatsApp transport is validated, because memory/disk efficiency matters for the intended VPS class.
+Если browserless WhatsApp transport проходит spike, v0.1 не должна требовать headless Chromium, поскольку память и диск важны для дешёвой VPS.
 
-## Storage target
+## Хранение
 
-Text and metadata may be retained long-term.
+Text/metadata могут храниться долго.
 
-Media is temporary and bounded. The initial operational target is approximately a 5 GiB soft media-cache budget on a 20 GiB VPS, with a separately configurable hard ceiling and sufficient reserved disk space for the operating system, database, logs, and upgrades.
+Media временно и ограниченно. Исходный ориентир — около 5 GiB soft media-cache budget на VPS с диском около 20 GiB, отдельный hard ceiling и зарезервированное место для ОС, БД, логов и обновлений.
 
-Exact limits are configuration, not protocol constants.
+Точные значения являются настройками.
 
-## Acceptance test
+## Приёмочная проверка
 
-v0.1 is complete when an operator can configure two real groups and pass an end-to-end test covering at least:
+v0.1 завершена, когда оператор может настроить две реальные группы и пройти как минимум следующие сценарии:
 
 1. Telegram text -> WhatsApp;
 2. WhatsApp text -> Telegram;
-3. reply Telegram -> WhatsApp -> Telegram mapping;
-4. reply WhatsApp -> Telegram -> WhatsApp mapping;
-5. duplicate inbound event does not duplicate an outbound message;
-6. a relay-created message received back from an adapter is not re-relayed;
-7. restart with pending work resumes delivery;
-8. transient send failure retries after restart;
-9. an uncertain send is recorded distinctly from a known failure;
-10. image/file relay with cache cleanup;
-11. media quota exhaustion does not prevent ordinary text relay;
-12. health output makes adapter/database/queue state diagnosable without exposing secrets.
+3. reply Telegram -> WhatsApp с корректным mapping;
+4. reply WhatsApp -> Telegram с корректным mapping;
+5. duplicate inbound event не создаёт duplicate outbound message;
+6. сообщение, созданное relay и увиденное обратно адаптером, не ретранслируется повторно;
+7. restart с pending work возобновляет доставку;
+8. transient send failure переживает restart и корректно retry-ится;
+9. ambiguous send записывается как `uncertain`, а не как известный failure;
+10. image/file relay работает с последующим cleanup;
+11. media quota exhaustion не блокирует обычный text relay;
+12. health output позволяет диагностировать adapters/database/queue без раскрытия секретов и private payload.
 
 ## Definition of done
 
-- architecture and wire/storage schemas used by implementation are versioned/documented;
-- automated tests cover core routing, deduplication, message mapping, delivery-state transitions, and storage limits;
-- real Telegram/WhatsApp smoke procedure is documented;
-- systemd deployment and backup/restore procedure are documented;
-- no secrets or WhatsApp session material are committed to the repository;
-- a fresh small Ubuntu VPS can be brought up from documented steps.
+- архитектура и используемые wire/storage schemas документированы и версионируются;
+- automated tests покрывают routing, deduplication, message mapping, delivery states и storage limits;
+- documented real Telegram/WhatsApp smoke procedure;
+- documented systemd deployment и backup/restore;
+- секреты и WhatsApp session material отсутствуют в Git;
+- свежая небольшая Ubuntu VPS может быть развёрнута по документации;
+- вся человекочитаемая часть проекта соответствует русскому языку проекта.
